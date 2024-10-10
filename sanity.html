@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <script type="module" src="./mtplot.js"></script>
+    </head>
+    <body>
+        <div id="container" style="border:1px solid black;height: 130px;width: 365px;resize: both;overflow: auto;"></div>
+
+        <script type="module">
+            import MTPlot from './mtplot.js';
+            document.addEventListener('DOMContentLoaded', () => {
+
+                const data = [];
+                for (let i = 0; i < 360; i++) {
+                    const x = new Date();
+                    x.setDate(x.getDate() - 360 + i);
+                    const y = 1000*Math.random();
+                    data.push({x, y});
+                }
+
+                const mtplot = new MTPlot("container", data
+                );
+                
+            });
+        </script>        
+    </body>
+</html>
