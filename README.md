@@ -10,7 +10,7 @@ mini time plot
 
 - small size
 - simplicity over features
-- value over time bar chart
+- draws bar chart with value (Y axis) and time (X axis)
 - no crazy scenarios (ex. same X for multiple points)
 
 ## Description
