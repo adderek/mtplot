@@ -13,7 +13,7 @@
                 const increment = 50;
                 const data = [];
                 const start_ts = (new Date()).getTime(); // number of milliseconds since Unix epoch
-                const xgroupspeed = 10;
+                const xgroupspeed = 3;
                 const xlen = 365;
 
                 for (let i = -xlen; i <= 0; i++) {
@@ -28,10 +28,9 @@
                     window.xoffset = (window.xoffset || 0) + 1;
                     const x = new Date(start_ts + window.xoffset * increment);
                     const y = 250+1000*Math.sin((window.xoffset*xgroupspeed)/180*Math.PI);
-                    //mtplot.replaceOldest({x, y});
-                    mtplot.dataProxy[10] = {x, y};
+                    mtplot.replaceOldest({x, y});
                 }, increment);
-                mtplot.refreshDelay = 1000;
+                //mtplot.refreshDelay = 1000;
                 /*
                 Use cases:
                 - update data[i];                   // replace value               past data processing

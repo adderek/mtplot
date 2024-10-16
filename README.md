@@ -4,6 +4,8 @@
 
 mini time plot
 
+[Demo](https://adderek.github.io/mtplot/)
+
 ## Fundamental assumptions
 
 - small size

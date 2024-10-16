@@ -1,3 +1,6 @@
+// FIXME: jeśli ustawiam minX i maxX to chcę aby tylko ten czas był wyświetlony
+// i rysownaie ostatniego bar'a musi być inaczej liczone
+
 // @ts-check
 
 const ns = "http://www.w3.org/2000/svg";
@@ -44,6 +47,9 @@ export default class MTPlot {
      * @type number
      */
     h = 100;
+
+    minX;
+    maxX;
 
     /**
      * Create new MTPlot instance
@@ -128,12 +134,16 @@ export default class MTPlot {
         const lowestValue = d.reduce((a, b) => a.y < b.y ? a : b).y;
         const highestValue = d.reduce((a, b) => a.y > b.y ? a : b).y;
 
-        /** @type {number} */
-        const xLen = (d[d.length - 1].x.valueOf() - d[0].x.valueOf());
-        if (!xLen) return;
-
-        const xScale = (w-10) / xLen;
-        const yScale = h / (highestValue - lowestValue);
+        let xScale, yScale;
+        if (this.minX!==undefined && this.maxX!==undefined) {
+            xScale = (w-10) / (this.maxX - this.minX)
+        } else {
+                /** @type {number} */
+                const xLen = (d[d.length - 1].x.valueOf() - d[0].x.valueOf());
+                if (!xLen) return;
+                xScale = (w-10) / xLen;
+        }
+        yScale = h / (highestValue - lowestValue);
         for (let i = 0; i < d.length; i++) {
             const rect = document.createElementNS(ns, "rect");
             rect.setAttribute("x", `${xScale * (d[i].x.valueOf() - d[0].x.valueOf())}`);
