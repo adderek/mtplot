@@ -51,6 +51,21 @@ export default class MTPlot {
     minX;
     maxX;
 
+    /** @type number */
+    #lowValueThreshold = 0.02;  // 2% by default
+
+    /** @type number */
+    #consecutiveDaysThreshold = 2;  // 2 days by default
+
+    /** @type number */
+    #stagnationDaysThreshold = 3;  // 3 consecutive days default
+
+    /** @type number */
+    #stagnationChangeThreshold = 0.2;  // 20% of average change
+
+    /** @type number */
+    #activeChangeDaysPercentage = 0.85;  // 85% of days should show change
+
     /**
      * Create new MTPlot instance
      * within parent HTMLElement having given id
@@ -114,6 +129,105 @@ export default class MTPlot {
     }
 
     /**
+     * Configure low value detection settings
+     * @param {object} options
+     * @param {number} [options.threshold] - Threshold for low value (0-1, representing percentage of range)
+     * @param {number} [options.consecutiveDays] - Number of consecutive days required to trigger warning
+     */
+    configureLowValueDetection(options = {}) {
+        if (options.threshold !== undefined) {
+            this.#lowValueThreshold = Math.max(0, Math.min(1, options.threshold));
+        }
+        if (options.consecutiveDays !== undefined) {
+            this.#consecutiveDaysThreshold = Math.max(1, options.consecutiveDays);
+        }
+    }
+
+    /**
+     * Configure stagnation detection settings
+     * @param {object} options
+     * @param {number} [options.consecutiveDays] - Number of consecutive days to detect stagnation
+     * @param {number} [options.changeThreshold] - Fraction of average daily change to consider significant (0-1)
+     * @param {number} [options.activeChangePercentage] - Required percentage of days with changes (0-1)
+     */
+    configureStagnationDetection(options = {}) {
+        if (options.consecutiveDays !== undefined) {
+            this.#stagnationDaysThreshold = Math.max(1, options.consecutiveDays);
+        }
+        if (options.changeThreshold !== undefined) {
+            this.#stagnationChangeThreshold = Math.max(0, options.changeThreshold);
+        }
+        if (options.activeChangePercentage !== undefined) {
+            this.#activeChangeDaysPercentage = Math.max(0, Math.min(1, options.activeChangePercentage));
+        }
+    }
+
+    /**
+     * Check if a sequence of points represents consecutive low values
+     * @param {Array<{x:Date, y:number}>} points - Array of consecutive points to check
+     * @param {number} lowThreshold - The Y value threshold for low values
+     * @returns {boolean}
+     */
+    #isConsecutiveLowValues(points, lowThreshold) {
+        if (points.length < this.#consecutiveDaysThreshold) return false;
+        
+        // Check if points are consecutive days
+        for (let i = 1; i < points.length; i++) {
+            const daysDiff = (points[i].x.valueOf() - points[i-1].x.valueOf()) / (24 * 60 * 60 * 1000);
+            if (daysDiff > 1.1) return false; // Allow small tolerance for time differences
+        }
+
+        // Check if all values are below threshold
+        return points.every(p => p.y <= lowThreshold);
+    }
+
+    /**
+     * Calculate the average absolute change between consecutive points
+     * @param {Array<{x:Date, y:number}>} points
+     * @returns {number}
+     */
+    #calculateAverageChange(points) {
+        if (points.length < 2) return 0;
+        let totalChange = 0;
+        let changes = 0;
+        
+        for (let i = 1; i < points.length; i++) {
+            const change = Math.abs(points[i].y - points[i-1].y);
+            if (change > 0) {
+                totalChange += change;
+                changes++;
+            }
+        }
+        
+        return changes > 0 ? totalChange / changes : 0;
+    }
+
+    /**
+     * Check if a sequence represents a period of stagnation
+     * @param {Array<{x:Date, y:number}>} points - Points to check
+     * @param {number} avgDailyChange - Average daily change across all data
+     * @returns {boolean}
+     */
+    #isStagnationPeriod(points, avgDailyChange) {
+        if (points.length < this.#stagnationDaysThreshold) return false;
+        
+        // Check if points are consecutive days
+        for (let i = 1; i < points.length; i++) {
+            const daysDiff = (points[i].x.valueOf() - points[i-1].x.valueOf()) / (24 * 60 * 60 * 1000);
+            if (daysDiff > 1.1) return false;
+        }
+
+        // Check if changes are below threshold
+        const significantChangeThreshold = avgDailyChange * this.#stagnationChangeThreshold;
+        for (let i = 1; i < points.length; i++) {
+            const change = Math.abs(points[i].y - points[i-1].y);
+            if (change > significantChangeThreshold) return false;
+        }
+
+        return true;
+    }
+
+    /**
      * Force plot refresh
      * @deprecated Normally called automatically
      */
@@ -133,17 +247,97 @@ export default class MTPlot {
         d.sort((a, b) => a.x.valueOf() - b.x.valueOf());
         const lowestValue = d.reduce((a, b) => a.y < b.y ? a : b).y;
         const highestValue = d.reduce((a, b) => a.y > b.y ? a : b).y;
+        const valueRange = highestValue - lowestValue;
+        const lowValueThreshold = lowestValue + (valueRange * this.#lowValueThreshold);
+
+        // Calculate average daily change
+        const avgDailyChange = this.#calculateAverageChange(d);
+
+        // Count days with significant changes to verify we meet the active change percentage
+        let daysWithSignificantChange = 0;
+        for (let i = 1; i < d.length; i++) {
+            const change = Math.abs(d[i].y - d[i-1].y);
+            if (change > avgDailyChange * this.#stagnationChangeThreshold) {
+                daysWithSignificantChange++;
+            }
+        }
+
+        const hasEnoughActiveChanges = 
+            daysWithSignificantChange / (d.length - 1) >= this.#activeChangeDaysPercentage;
 
         let xScale, yScale;
         if (this.minX!==undefined && this.maxX!==undefined) {
-            xScale = (w-10) / (this.maxX - this.minX)
+            xScale = (w-10) / (this.maxX - this.minX);
         } else {
-                /** @type {number} */
-                const xLen = (d[d.length - 1].x.valueOf() - d[0].x.valueOf());
-                if (!xLen) return;
-                xScale = (w-10) / xLen;
+            /** @type {number} */
+            const xLen = (d[d.length - 1].x.valueOf() - d[0].x.valueOf());
+            if (!xLen) return;
+            xScale = (w-10) / xLen;
         }
-        yScale = h / (highestValue - lowestValue);
+        yScale = h / valueRange;
+
+        // Only check for stagnation if we have enough active changes overall
+        if (hasEnoughActiveChanges) {
+            // Find sequences of stagnation
+            let currentStagnationSequence = [];
+            for (let i = 0; i < d.length; i++) {
+                currentStagnationSequence.push(d[i]);
+                
+                if (i === d.length - 1 || Math.abs(d[i+1].y - d[i].y) > avgDailyChange * this.#stagnationChangeThreshold) {
+                    if (this.#isStagnationPeriod(currentStagnationSequence, avgDailyChange)) {
+                        // Draw orange rectangle for the stagnation period
+                        const rect = document.createElementNS(ns, "rect");
+                        const startX = xScale * (currentStagnationSequence[0].x.valueOf() - d[0].x.valueOf());
+                        const width = xScale * (
+                            currentStagnationSequence[currentStagnationSequence.length - 1].x.valueOf() - 
+                            currentStagnationSequence[0].x.valueOf()
+                        );
+                        rect.setAttribute("x", `${startX}`);
+                        rect.setAttribute("y", "0");
+                        rect.setAttribute("width", `${width + (i === d.length-1 ? 10 : 0)}`);
+                        rect.setAttribute("height", `${h}`);
+                        rect.setAttribute("fill", "rgba(255,165,0,0.2)");
+                        this.svg.appendChild(rect);
+                    }
+                    currentStagnationSequence = [];
+                }
+            }
+        }
+
+        // Find sequences of low values
+        let currentLowSequence = [];
+        for (let i = 0; i < d.length; i++) {
+            if (d[i].y <= lowValueThreshold) {
+                currentLowSequence.push(d[i]);
+            } else {
+                if (this.#isConsecutiveLowValues(currentLowSequence, lowValueThreshold)) {
+                    // Draw red rectangle for the sequence
+                    const rect = document.createElementNS(ns, "rect");
+                    const startX = xScale * (currentLowSequence[0].x.valueOf() - d[0].x.valueOf());
+                    const width = xScale * (currentLowSequence[currentLowSequence.length - 1].x.valueOf() - currentLowSequence[0].x.valueOf());
+                    rect.setAttribute("x", `${startX}`);
+                    rect.setAttribute("y", "0");
+                    rect.setAttribute("width", `${width + (i === d.length-1 ? 10 : 0)}`);
+                    rect.setAttribute("height", `${h}`);
+                    rect.setAttribute("fill", "rgba(255,0,0,0.2)");
+                    this.svg.appendChild(rect);
+                }
+                currentLowSequence = [];
+            }
+        }
+        // Check last sequence
+        if (this.#isConsecutiveLowValues(currentLowSequence, lowValueThreshold)) {
+            const rect = document.createElementNS(ns, "rect");
+            const startX = xScale * (currentLowSequence[0].x.valueOf() - d[0].x.valueOf());
+            const width = xScale * (currentLowSequence[currentLowSequence.length - 1].x.valueOf() - currentLowSequence[0].x.valueOf());
+            rect.setAttribute("x", `${startX}`);
+            rect.setAttribute("y", "0");
+            rect.setAttribute("width", `${width + 10}`);
+            rect.setAttribute("height", `${h}`);
+            rect.setAttribute("fill", "rgba(255,0,0,0.2)");
+            this.svg.appendChild(rect);
+        }
+
         for (let i = 0; i < d.length; i++) {
             const rect = document.createElementNS(ns, "rect");
             rect.setAttribute("x", `${xScale * (d[i].x.valueOf() - d[0].x.valueOf())}`);

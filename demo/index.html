@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>MTPlot Demo</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .plot-container {
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            height: 400px; /* Fixed height for responsive demo */
+        }
+        .controls {
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        .plot {
+            width: 100%;
+            height: 100%;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 10px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        .settings {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        .setting-group {
+            padding: 15px;
+            background: #f9f9f9;
+            border-radius: 4px;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+        }
+        input[type="number"], input[type="checkbox"] {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin-bottom: 10px;
+        }
+        .checkbox-label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .checkbox-label input[type="checkbox"] {
+            width: auto;
+            margin: 0;
+        }
+        .theme-selector {
+            margin-bottom: 20px;
+        }
+        @media (max-width: 768px) {
+            .settings {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>MTPlot Demo</h1>
+        
+        <div class="plot-container">
+            <div id="plot1" class="plot"></div>
+        </div>
+
+        <div class="controls">
+            <div class="theme-selector">
+                <h2>Theme</h2>
+                <button id="lightTheme">Light Theme</button>
+                <button id="darkTheme">Dark Theme</button>
+                <button id="highContrastTheme">High Contrast</button>
+            </div>
+
+            <h2>Settings</h2>
+            <div class="settings">
+                <div class="setting-group">
+                    <h3>Features</h3>
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="responsive" checked>
+                        Responsive
+                    </label>
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="enableZoom" checked>
+                        Enable Zoom
+                    </label>
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="enablePan" checked>
+                        Enable Pan
+                    </label>
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="enableKeyboard" checked>
+                        Keyboard Navigation
+                    </label>
+                </div>
+
+                <div class="setting-group">
+                    <h3>Low Value Detection</h3>
+                    <label>
+                        Threshold (0-1):
+                        <input type="number" id="lowValueThreshold" min="0" max="1" step="0.01" value="0.02">
+                    </label>
+                    <label>
+                        Consecutive Days:
+                        <input type="number" id="lowValueDays" min="1" step="1" value="2">
+                    </label>
+                </div>
+
+                <div class="setting-group">
+                    <h3>Stagnation Detection</h3>
+                    <label>
+                        Change Threshold (0-1):
+                        <input type="number" id="stagnationThreshold" min="0" max="1" step="0.01" value="0.2">
+                    </label>
+                    <label>
+                        Consecutive Days:
+                        <input type="number" id="stagnationDays" min="1" step="1" value="3">
+                    </label>
+                    <label>
+                        Active Change % (0-1):
+                        <input type="number" id="activeChangePercent" min="0" max="1" step="0.01" value="0.85">
+                    </label>
+                </div>
+
+                <div class="setting-group">
+                    <h3>Performance</h3>
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="enableVirtualization" checked>
+                        Enable Virtualization
+                    </label>
+                    <label>
+                        Clustering Threshold:
+                        <input type="number" id="clusteringThreshold" min="100" step="100" value="1000">
+                    </label>
+                </div>
+            </div>
+
+            <button id="applySettings">Apply Settings</button>
+            <button id="exportCSV">Export CSV</button>
+            <button id="exportSVG">Export SVG</button>
+            <button id="generateMore">Generate More Data</button>
+        </div>
+    </div>
+
+    <script type="module">
+        import { MTPlot } from '../dist/mtplot.esm.js';
+
+        // Generate sample data
+        function generateData(days = 365) {
+            const data = [];
+            const start = new Date();
+            start.setDate(start.getDate() - days);
+
+            for (let i = 0; i < days; i++) {
+                const date = new Date(start);
+                date.setDate(date.getDate() + i);
+                
+                // Generate some interesting patterns
+                let value = 1000 + Math.sin(i / 10) * 200;  // Base sine wave
+                
+                // Add some low value periods
+                if (i > 50 && i < 60) value = 900;
+                if (i > 150 && i < 160) value = 850;
+                
+                // Add some stagnation periods
+                if (i > 100 && i < 110) value = 1200;
+                if (i > 200 && i < 210) value = 1100;
+                
+                // Add some noise
+                value += Math.random() * 50;
+                
+                data.push({ x: date, y: value });
+            }
+            
+            return data;
+        }
+
+        // Initialize plot with all new options
+        const plot = new MTPlot('plot1', generateData(), {
+            width: 1000,
+            height: 300,
+            responsive: true,
+            accessibility: {
+                enableKeyboardNavigation: true,
+                enableScreenReader: true,
+                highContrast: false,
+                ariaLabel: 'Time series visualization'
+            },
+            interaction: {
+                enableZoom: true,
+                enablePan: true,
+                tooltipFormat: (point) => `Date: ${point.x.toLocaleDateString()}\nValue: ${point.y.toFixed(2)}`
+            },
+            performance: {
+                enableVirtualization: true,
+                clusteringThreshold: 1000,
+                useWebWorker: true
+            },
+            patterns: {
+                lowValue: {
+                    threshold: 0.02,
+                    consecutiveDays: 2
+                },
+                stagnation: {
+                    consecutiveDays: 3,
+                    changeThreshold: 0.2,
+                    activeChangePercentage: 0.85
+                }
+            }
+        });
+
+        // Theme handling
+        document.getElementById('lightTheme').addEventListener('click', () => {
+            plot.setTheme({
+                backgroundColor: 'white',
+                textColor: 'black',
+                barColor: '#4CAF50',
+                barHoverColor: '#45a049'
+            });
+        });
+
+        document.getElementById('darkTheme').addEventListener('click', () => {
+            plot.setTheme({
+                backgroundColor: '#2d2d2d',
+                textColor: 'white',
+                barColor: '#6abf69',
+                barHoverColor: '#88cc87'
+            });
+        });
+
+        document.getElementById('highContrastTheme').addEventListener('click', () => {
+            plot.setTheme({
+                backgroundColor: 'white',
+                textColor: 'black',
+                barColor: '#000000',
+                barHoverColor: '#666666'
+            });
+            plot.setOptions({
+                accessibility: {
+                    highContrast: true
+                }
+            });
+        });
+
+        // Feature toggles
+        document.getElementById('responsive').addEventListener('change', (e) => {
+            plot.setOptions({ responsive: e.target.checked });
+        });
+
+        document.getElementById('enableZoom').addEventListener('change', (e) => {
+            plot.setOptions({ interaction: { enableZoom: e.target.checked } });
+        });
+
+        document.getElementById('enablePan').addEventListener('change', (e) => {
+            plot.setOptions({ interaction: { enablePan: e.target.checked } });
+        });
+
+        document.getElementById('enableKeyboard').addEventListener('change', (e) => {
+            plot.setOptions({ 
+                accessibility: { 
+                    enableKeyboardNavigation: e.target.checked 
+                } 
+            });
+        });
+
+        // Settings application
+        document.getElementById('applySettings').addEventListener('click', () => {
+            const settings = {
+                patterns: {
+                    lowValue: {
+                        threshold: parseFloat(document.getElementById('lowValueThreshold').value),
+                        consecutiveDays: parseInt(document.getElementById('lowValueDays').value)
+                    },
+                    stagnation: {
+                        consecutiveDays: parseInt(document.getElementById('stagnationDays').value),
+                        changeThreshold: parseFloat(document.getElementById('stagnationThreshold').value),
+                        activeChangePercentage: parseFloat(document.getElementById('activeChangePercent').value)
+                    }
+                },
+                performance: {
+                    enableVirtualization: document.getElementById('enableVirtualization').checked,
+                    clusteringThreshold: parseInt(document.getElementById('clusteringThreshold').value)
+                }
+            };
+            plot.setOptions(settings);
+        });
+
+        // Export handlers
+        document.getElementById('exportCSV').addEventListener('click', () => {
+            const csv = plot.exportToCSV();
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'mtplot-data.csv';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        });
+
+        document.getElementById('exportSVG').addEventListener('click', () => {
+            const svg = plot.exportToSVG();
+            const blob = new Blob([svg], { type: 'image/svg+xml' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'mtplot-chart.svg';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        });
+
+        // Generate more data
+        document.getElementById('generateMore').addEventListener('click', () => {
+            const newData = generateData(30);  // Generate 30 more days
+            newData.forEach(point => plot.addData(point));
+        });
+    </script>
+</body>
+</html>
