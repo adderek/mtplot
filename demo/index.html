@@ -181,23 +181,25 @@
             const start = new Date();
             start.setDate(start.getDate() - days);
 
+            const a = (Math.random() * 0.1) - 0.05;
+            const b = (Math.random() * 0.2) - 0.1;
+            const c = (Math.random() * 1000) - 500;
+
             for (let i = 0; i < days; i++) {
                 const date = new Date(start);
                 date.setDate(date.getDate() + i);
                 
-                // Generate some interesting patterns
-                let value = 1000 + Math.sin(i / 10) * 200;  // Base sine wave
+                // Generate some interesting patterns using quadratic function
+                let value = c + (a * i * i) + (b * i);  // y = ax² + bx + c
                 
                 // Add some low value periods
                 if (i > 50 && i < 60) value = 900;
-                if (i > 150 && i < 160) value = 850;
-                
+                else if (i > 150 && i < 160) value = 850;
                 // Add some stagnation periods
-                if (i > 100 && i < 110) value = 1200;
-                if (i > 200 && i < 210) value = 1100;
-                
-                // Add some noise
-                value += Math.random() * 50;
+                else if (i > 100 && i < 110) value = c+a*100*100+b*100;
+                else if (i > 200 && i < 210) value = c+a*200*200+b*200;
+                else // Add some noise
+                    value += Math.random() * ((c+a*days*days+b*days)*0.3);
                 
                 data.push({ x: date, y: value });
             }
