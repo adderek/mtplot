@@ -26,6 +26,12 @@ export default {
       name: 'MTPlot',
       plugins: [terser()],
       sourcemap: true
+    },
+    {
+      file: 'dist/mtplot.esm.min.js',
+      format: 'es',
+      plugins: [terser()],
+      sourcemap: true
     }
   ],
   plugins: [
