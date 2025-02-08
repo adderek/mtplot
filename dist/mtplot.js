@@ -6,46 +6,32 @@
 
     const SVG_NS = 'http://www.w3.org/2000/svg';
     class SVGRenderer {
-        constructor(container, width, height) {
-            this.width = width;
-            this.height = height;
-            this.svg = document.createElementNS(SVG_NS, 'svg');
-            this.svg.setAttribute('width', width.toString());
-            this.svg.setAttribute('height', height.toString());
-            this.svg.setAttribute('class', 'mtplot-svg');
-            // Create defs for gradients and patterns
-            this.defs = document.createElementNS(SVG_NS, 'defs');
-            this.svg.appendChild(this.defs);
-            // Create main group for transformation
-            this.mainGroup = document.createElementNS(SVG_NS, 'g');
+        constructor(container, options) {
+            this.width = options.width;
+            this.height = options.height;
+            // Create SVG element
+            this.svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+            this.svg.setAttribute("width", this.width.toString());
+            this.svg.setAttribute("height", this.height.toString());
+            this.svg.style.backgroundColor = options.backgroundColor || "#ffffff";
+            // Create main group for transformations
+            this.mainGroup = document.createElementNS("http://www.w3.org/2000/svg", "g");
             this.svg.appendChild(this.mainGroup);
             // Create tooltip elements
-            this.tooltipBackground = document.createElementNS(SVG_NS, 'rect');
-            this.tooltipBackground.setAttribute('class', 'mtplot-tooltip-bg');
-            this.tooltipBackground.setAttribute('rx', '4');
-            this.tooltipBackground.setAttribute('ry', '4');
-            this.tooltipBackground.setAttribute('fill', 'white');
-            this.tooltipBackground.setAttribute('stroke', '#ccc');
-            this.tooltipBackground.style.display = 'none';
-            this.tooltip = document.createElementNS(SVG_NS, 'text');
-            this.tooltip.setAttribute('class', 'mtplot-tooltip');
-            this.tooltip.style.display = 'none';
-            this.svg.appendChild(this.tooltipBackground);
+            this.tooltip = document.createElementNS("http://www.w3.org/2000/svg", "g");
+            this.tooltip.style.display = "none";
+            this.tooltipBackground = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+            this.tooltipBackground.setAttribute("fill", "white");
+            this.tooltipBackground.setAttribute("stroke", "black");
+            this.tooltipBackground.setAttribute("rx", "4");
+            this.tooltipBackground.setAttribute("ry", "4");
+            this.tooltipText = document.createElementNS("http://www.w3.org/2000/svg", "text");
+            this.tooltipText.setAttribute("fill", "black");
+            this.tooltipText.setAttribute("font-size", "12px");
+            this.tooltip.appendChild(this.tooltipBackground);
+            this.tooltip.appendChild(this.tooltipText);
             this.svg.appendChild(this.tooltip);
-            this.setupSVG(container, width, height);
-            // Setup pan and zoom handling
-            this.setupInteraction();
-        }
-        setupSVG(container, width, height) {
-            const attributes = [
-                ['version', '1.1'],
-                ['viewBox', `0 0 ${width} ${height}`],
-                ['preserveAspectRatio', 'none'],
-                ['style', 'width: 100%; height: 100%;']
-            ];
-            attributes.forEach(([name, value]) => {
-                this.svg.setAttribute(name, value);
-            });
+            // Add SVG to container
             container.appendChild(this.svg);
         }
         setupInteraction() {
@@ -95,23 +81,34 @@
             }
         }
         drawBar(x, y, width, height, color, options = {}) {
-            const rect = document.createElementNS(SVG_NS, 'rect');
-            rect.setAttribute('x', x.toString());
-            rect.setAttribute('y', y.toString());
-            rect.setAttribute('width', width.toString());
-            rect.setAttribute('height', height.toString());
-            if (options.highContrast) {
-                rect.setAttribute('fill', this.getHighContrastColor(color));
-                rect.setAttribute('stroke', 'black');
-                rect.setAttribute('stroke-width', '2');
-            }
-            else {
-                rect.setAttribute('fill', color);
+            const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+            rect.setAttribute("x", x.toString());
+            rect.setAttribute("y", y.toString());
+            rect.setAttribute("width", width.toString());
+            rect.setAttribute("height", height.toString());
+            rect.setAttribute("fill", color);
+            if (options.isHovered) {
+                rect.setAttribute("stroke", "#000000");
+                rect.setAttribute("stroke-width", "2");
+                rect.setAttribute("fill-opacity", "0.8");
             }
             if (options.interactive) {
-                rect.setAttribute('data-tooltip', options.tooltip || '');
-                rect.style.cursor = 'pointer';
-                this.setupBarInteraction(rect);
+                rect.style.cursor = "pointer";
+                if (options.tooltip) {
+                    rect.addEventListener("mouseenter", (e) => {
+                        var _a;
+                        this.showTooltip(options.tooltip, e.clientX, e.clientY);
+                        (_a = options.onHover) === null || _a === undefined ? undefined : _a.call(options);
+                    });
+                    rect.addEventListener("mouseleave", () => {
+                        var _a;
+                        this.hideTooltip();
+                        (_a = options.onLeave) === null || _a === undefined ? undefined : _a.call(options);
+                    });
+                    rect.addEventListener("mousemove", (e) => {
+                        this.updateTooltipPosition(e.clientX, e.clientY);
+                    });
+                }
             }
             this.mainGroup.appendChild(rect);
         }
@@ -142,52 +139,71 @@
                 this.hideTooltip();
             });
         }
-        showTooltip(text, x, y) {
-            // Join text lines with a space
-            const combinedText = text.split('\n').join(' ');
+        clientToSVGPoint(clientX, clientY) {
+            var _a;
+            const pt = this.svg.createSVGPoint();
+            pt.x = clientX;
+            pt.y = clientY;
+            // Convert client coordinates to SVG coordinates
+            const svgP = pt.matrixTransform((_a = this.svg.getScreenCTM()) === null || _a === undefined ? undefined : _a.inverse());
+            return { x: svgP.x, y: svgP.y };
+        }
+        showTooltip(text, clientX, clientY) {
+            const svgPoint = this.clientToSVGPoint(clientX, clientY);
             // Clear previous tooltip content
-            while (this.tooltip.firstChild) {
-                this.tooltip.removeChild(this.tooltip.firstChild);
+            while (this.tooltipText.firstChild) {
+                this.tooltipText.removeChild(this.tooltipText.firstChild);
             }
-            // Add single tspan element with combined text
-            const tspan = document.createElementNS(SVG_NS, 'tspan');
-            tspan.textContent = combinedText;
-            tspan.setAttribute('x', '0');
-            this.tooltip.appendChild(tspan);
+            // Add text content
+            const tspan = document.createElementNS("http://www.w3.org/2000/svg", "tspan");
+            tspan.textContent = text;
+            tspan.setAttribute("x", "5");
+            tspan.setAttribute("y", "15");
+            this.tooltipText.appendChild(tspan);
             // Calculate tooltip dimensions
-            const bbox = this.tooltip.getBBox();
-            const padding = 8;
+            const bbox = this.tooltipText.getBBox();
+            const padding = 5;
             const tooltipWidth = bbox.width + 2 * padding;
             const tooltipHeight = bbox.height + 2 * padding;
-            // Position the text vertically centered with padding
-            tspan.setAttribute('y', (padding + bbox.height).toString());
-            // Calculate position that keeps tooltip within bounds
-            let tooltipX = x + 10; // Default offset from cursor
-            let tooltipY = y - tooltipHeight - 10; // Default position above cursor
-            // Adjust horizontal position if tooltip would go outside right edge
+            // Position tooltip
+            let tooltipX = svgPoint.x + 10;
+            let tooltipY = svgPoint.y - tooltipHeight - 10;
+            // Adjust position if tooltip would go outside viewport
             if (tooltipX + tooltipWidth > this.width) {
-                tooltipX = x - tooltipWidth - 10; // Place tooltip to the left of cursor
+                tooltipX = svgPoint.x - tooltipWidth - 10;
             }
-            // Adjust vertical position if tooltip would go outside top edge
             if (tooltipY < 0) {
-                tooltipY = y + 20; // Place tooltip below cursor
+                tooltipY = svgPoint.y + 20;
             }
-            // Ensure tooltip doesn't go outside left or bottom edges
-            tooltipX = Math.max(5, Math.min(this.width - tooltipWidth - 5, tooltipX));
-            tooltipY = Math.max(5, Math.min(this.height - tooltipHeight - 5, tooltipY));
-            // Position the tooltip and background
-            this.tooltip.setAttribute('transform', `translate(${tooltipX}, ${tooltipY})`);
-            this.tooltipBackground.setAttribute('x', tooltipX.toString());
-            this.tooltipBackground.setAttribute('y', tooltipY.toString());
-            this.tooltipBackground.setAttribute('width', tooltipWidth.toString());
-            this.tooltipBackground.setAttribute('height', tooltipHeight.toString());
-            // Show the tooltip
-            this.tooltipBackground.style.display = '';
-            this.tooltip.style.display = '';
+            // Update tooltip position and dimensions
+            this.tooltipBackground.setAttribute("x", tooltipX.toString());
+            this.tooltipBackground.setAttribute("y", tooltipY.toString());
+            this.tooltipBackground.setAttribute("width", tooltipWidth.toString());
+            this.tooltipBackground.setAttribute("height", tooltipHeight.toString());
+            this.tooltipText.setAttribute("transform", `translate(${tooltipX}, ${tooltipY})`);
+            // Show tooltip
+            this.tooltip.style.display = "";
         }
         hideTooltip() {
-            this.tooltipBackground.style.display = 'none';
-            this.tooltip.style.display = 'none';
+            this.tooltip.style.display = "none";
+        }
+        updateTooltipPosition(clientX, clientY) {
+            const svgPoint = this.clientToSVGPoint(clientX, clientY);
+            const bbox = this.tooltipText.getBBox();
+            const padding = 5;
+            const tooltipWidth = bbox.width + 2 * padding;
+            const tooltipHeight = bbox.height + 2 * padding;
+            let tooltipX = svgPoint.x + 10;
+            let tooltipY = svgPoint.y - tooltipHeight - 10;
+            if (tooltipX + tooltipWidth > this.width) {
+                tooltipX = svgPoint.x - tooltipWidth - 10;
+            }
+            if (tooltipY < 0) {
+                tooltipY = svgPoint.y + 20;
+            }
+            this.tooltipBackground.setAttribute("x", tooltipX.toString());
+            this.tooltipBackground.setAttribute("y", tooltipY.toString());
+            this.tooltipText.setAttribute("transform", `translate(${tooltipX}, ${tooltipY})`);
         }
         drawPattern(x, y, width, height, color, patternType) {
             const pattern = document.createElementNS(SVG_NS, 'rect');
@@ -228,6 +244,16 @@
             attrs.forEach(([name, value]) => textElem.setAttribute(name, value));
             textElem.textContent = text;
             this.mainGroup.appendChild(textElem);
+        }
+        drawLine(x1, y1, x2, y2, color, width) {
+            const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+            line.setAttribute("x1", x1.toString());
+            line.setAttribute("y1", y1.toString());
+            line.setAttribute("x2", x2.toString());
+            line.setAttribute("y2", y2.toString());
+            line.setAttribute("stroke", color);
+            line.setAttribute("stroke-width", width.toString());
+            this.mainGroup.appendChild(line);
         }
         getSVGElement() {
             return this.svg;
@@ -421,54 +447,11 @@
         };
     }
 
-    const DEFAULT_THEME = {
-        barColor: 'black',
-        barHoverColor: 'blue',
-        lowValueColor: 'rgba(255,0,0,0.2)',
-        stagnationColor: 'rgba(255,165,0,0.2)',
-        backgroundColor: 'white',
-        textColor: 'black',
-        fontFamily: 'monospace',
-        fontSize: 12
-    };
-    const DEFAULT_OPTIONS = {
-        width: 800,
-        height: 400,
-        theme: DEFAULT_THEME,
-        patterns: {
-            lowValue: {
-                threshold: 0.02,
-                consecutiveDays: 2
-            },
-            stagnation: {
-                consecutiveDays: 3,
-                changeThreshold: 0.2,
-                activeChangePercentage: 0.85
-            }
-        },
-        responsive: true,
-        accessibility: {
-            enableKeyboardNavigation: true,
-            enableScreenReader: true,
-            highContrast: false,
-            ariaLabel: 'Time series chart'
-        },
-        interaction: {
-            enableZoom: true,
-            enablePan: true,
-            tooltipFormat: (point) => `${formatDate(point.x)}: ${point.y}`,
-            onPointClick: undefined
-        },
-        performance: {
-            enableVirtualization: true,
-            clusteringThreshold: 1000,
-            useWebWorker: true
-        }
-    };
     class MTPlot {
         constructor(containerId, initialData = [], options = {}) {
-            var _a, _b;
+            this.trendLine = null;
             this.isDirty = false;
+            this.hoveredBarIndex = null;
             this.updateTimeout = null;
             this.refreshDelay = 100;
             this.resizeObserver = null;
@@ -478,34 +461,80 @@
                 scale: 1,
                 offset: { x: 0, y: 0 }
             };
+            this.clusterData = []; // Initialize as an empty array
             const container = document.getElementById(containerId);
             if (!container)
                 throw new Error(`No element found with id: ${containerId}`);
             this.container = container;
-            this.options = { ...DEFAULT_OPTIONS, ...options };
-            // Initialize tooltip
-            this.setupTooltip();
-            // Initialize WebWorker if enabled
-            if ((_a = this.options.performance) === null || _a === undefined ? undefined : _a.useWebWorker) {
-                this.setupWebWorker();
-            }
-            // Initialize renderer with responsive support
-            this.renderer = new SVGRenderer(container, this.getWidth(), this.getHeight());
-            // Set up accessibility
-            if ((_b = this.options.accessibility) === null || _b === undefined ? undefined : _b.enableScreenReader) {
-                this.setupAccessibility();
-            }
-            // Initialize data with sorting and clustering if needed
-            this.data = this.processInitialData(initialData);
+            // Initialize options with defaults
+            this.options = {
+                width: 800,
+                height: 400,
+                responsive: true,
+                theme: {
+                    backgroundColor: "#ffffff",
+                    barColor: "#4CAF50",
+                    textColor: "#000000",
+                    gridColor: "#e0e0e0"
+                },
+                patterns: {
+                    lowValue: {
+                        threshold: 0.02,
+                        consecutiveDays: 2
+                    },
+                    stagnation: {
+                        consecutiveDays: 3,
+                        changeThreshold: 0.2,
+                        activeChangePercentage: 0.85
+                    }
+                },
+                accessibility: {
+                    enableKeyboardNavigation: true,
+                    enableScreenReader: true,
+                    highContrast: false,
+                    ariaLabel: 'Time series chart'
+                },
+                interaction: {
+                    enableZoom: true,
+                    enablePan: true,
+                    tooltipFormat: (point) => `${formatDate(point.x)}: ${point.y}`,
+                    onPointClick: undefined
+                },
+                performance: {
+                    enableVirtualization: true,
+                    clusteringThreshold: 1000,
+                    useWebWorker: true
+                },
+                statistics: {
+                    enabled: false,
+                    showMean: false,
+                    showMedian: false,
+                    showMovingAverage: false,
+                    lineColor: {
+                        mean: "#FF0000",
+                        median: "#0000FF",
+                        movingAverage: "#00FF00"
+                    }
+                },
+                ...options
+            };
+            // Initialize pattern detectors first
             this.lowValueDetector = new LowValueDetector(this.options.patterns.lowValue);
             this.stagnationDetector = new StagnationDetector(this.options.patterns.stagnation);
-            // Set up event listeners
-            this.setupEventListeners();
-            // Set up responsive handling
+            // Initialize renderer
+            this.renderer = new SVGRenderer(this.container, {
+                width: this.getWidth(),
+                height: this.getHeight(),
+                backgroundColor: this.options.theme.backgroundColor
+            });
+            // Initialize data with sorting and clustering if needed
+            this.data = this.processInitialData(initialData);
+            // Set up resize handling if responsive
             if (this.options.responsive) {
-                this.setupResponsive();
+                this.setupResizeHandling();
             }
-            this.update();
+            // Initial render
+            this.render();
         }
         setupTooltip() {
             this.tooltip = document.createElement('div');
@@ -549,7 +578,8 @@
                 svg.addEventListener('keydown', this.handleKeyboardNavigation.bind(this));
             }
         }
-        setupResponsive() {
+        setupResizeHandling() {
+            // Create ResizeObserver to handle container resizing
             this.resizeObserver = new ResizeObserver((entries) => {
                 for (const entry of entries) {
                     if (entry.target === this.container) {
@@ -557,7 +587,19 @@
                     }
                 }
             });
+            // Start observing the container
             this.resizeObserver.observe(this.container);
+            // Also handle window resize events
+            window.addEventListener('resize', () => {
+                this.handleResize();
+            });
+        }
+        handleResize() {
+            // Update SVG dimensions
+            const newWidth = this.getWidth();
+            const newHeight = this.getHeight();
+            this.renderer.resize(newWidth, newHeight);
+            this.triggerUpdate();
         }
         getWidth() {
             return this.options.responsive ?
@@ -570,30 +612,35 @@
                 this.options.height;
         }
         processInitialData(data) {
-            var _a, _b;
             let processedData = [...data].sort((a, b) => a.x.valueOf() - b.x.valueOf());
-            if (((_a = this.options.performance) === null || _a === undefined ? undefined : _a.enableVirtualization) &&
-                processedData.length > (((_b = this.options.performance) === null || _b === undefined ? undefined : _b.clusteringThreshold) || 1000)) {
-                processedData = this.clusterData(processedData);
+            // Calculate trend line
+            if (processedData.length > 0) {
+                this.calculateTrendLine(processedData);
             }
             return processedData;
         }
-        clusterData(data) {
-            const clusterSize = Math.floor(data.length / this.getWidth());
-            if (clusterSize <= 1)
-                return data;
-            const clustered = [];
-            for (let i = 0; i < data.length; i += clusterSize) {
-                const cluster = data.slice(i, i + clusterSize);
-                const avgX = new Date(cluster.reduce((sum, p) => sum + p.x.valueOf(), 0) / cluster.length);
-                const avgY = cluster.reduce((sum, p) => sum + p.y, 0) / cluster.length;
-                clustered.push({ x: avgX, y: avgY });
-            }
-            return clustered;
-        }
-        handleResize() {
-            this.renderer.resize(this.getWidth(), this.getHeight());
-            this.triggerUpdate();
+        calculateTrendLine(data) {
+            // Find low value periods to exclude them
+            const lowValuePatterns = this.lowValueDetector.findPatterns(data);
+            const lowValueIndices = new Set();
+            lowValuePatterns.forEach(pattern => {
+                for (let i = pattern.start; i <= pattern.end; i++) {
+                    lowValueIndices.add(i);
+                }
+            });
+            // Filter out low value periods
+            const filteredData = data.filter((_, index) => !lowValueIndices.has(index));
+            if (filteredData.length < 2)
+                return; // Need at least 2 points for a trend line
+            const xVals = filteredData.map((_, i) => i);
+            const yVals = filteredData.map(point => point.y);
+            const xMean = xVals.reduce((a, b) => a + b, 0) / xVals.length;
+            const yMean = yVals.reduce((a, b) => a + b, 0) / yVals.length;
+            const ssxy = xVals.reduce((sum, x, i) => sum + (x - xMean) * (yVals[i] - yMean), 0);
+            const ssxx = xVals.reduce((sum, x) => sum + (x - xMean) * (x - xMean), 0);
+            const slope = ssxy / ssxx;
+            const intercept = yMean - slope * xMean;
+            this.trendLine = { slope, intercept };
         }
         handleKeyboardNavigation(e) {
             var _a;
@@ -667,46 +714,44 @@
             }
             return closest;
         }
-        setTheme(theme) {
-            this.options.theme = { ...this.options.theme, ...theme };
-            this.triggerUpdate();
+        drawTrendLine(valueRange, timeRange) {
+            if (!this.trendLine || !this.data.length)
+                return;
+            const { slope, intercept } = this.trendLine;
+            // Calculate start and end points for trend line
+            const startX = this.getXPosition(this.data[0].x, timeRange);
+            const endX = this.getXPosition(this.data[this.data.length - 1].x, timeRange);
+            const startY = this.scaleY(slope * 0 + intercept, valueRange);
+            const endY = this.scaleY(slope * (this.data.length - 1) + intercept, valueRange);
+            this.renderer.drawLine(startX, startY, endX, endY, "#ff0000", 2);
         }
-        setPatternOptions(options) {
-            if (options.lowValue) {
-                this.lowValueDetector = new LowValueDetector({
-                    ...this.options.patterns.lowValue,
-                    ...options.lowValue
-                });
+        render() {
+            var _a;
+            if (!this.isDirty)
+                return;
+            this.renderer.clear();
+            if (this.data.length === 0)
+                return;
+            const { width, height } = this.options;
+            const valueRange = this.calculateValueRange();
+            const timeRange = this.calculateTimeRange();
+            // Draw patterns first (background)
+            this.drawPatterns(valueRange, timeRange);
+            // Draw bars
+            this.drawBars(valueRange, timeRange);
+            // Draw trend line on top
+            this.drawTrendLine(valueRange, timeRange);
+            // Draw statistics if enabled
+            if ((_a = this.options.statistics) === null || _a === undefined ? undefined : _a.enabled) {
+                this.drawStatistics(valueRange);
             }
-            if (options.stagnation) {
-                this.stagnationDetector = new StagnationDetector({
-                    ...this.options.patterns.stagnation,
-                    ...options.stagnation
-                });
-            }
-            this.options.patterns = {
-                ...this.options.patterns,
-                ...options
-            };
-            this.triggerUpdate();
+            this.isDirty = false;
         }
         addData(point) {
             this.data.push(point);
             this.data.sort((a, b) => a.x.valueOf() - b.x.valueOf());
+            this.calculateTrendLine(this.data);
             this.triggerUpdate();
-        }
-        removeOldest() {
-            if (this.data.length > 0) {
-                this.data.shift();
-                this.triggerUpdate();
-            }
-        }
-        replaceOldest(point) {
-            if (this.data.length > 0) {
-                this.data[0] = point;
-                this.data.sort((a, b) => a.x.valueOf() - b.x.valueOf());
-                this.triggerUpdate();
-            }
         }
         triggerUpdate() {
             if (this.updateTimeout) {
@@ -719,6 +764,7 @@
             }, this.refreshDelay);
         }
         update() {
+            var _a;
             if (!this.isDirty)
                 return;
             this.renderer.clear();
@@ -727,12 +773,16 @@
             const { width, height } = this.options;
             const valueRange = this.calculateValueRange();
             const timeRange = this.calculateTimeRange();
-            // Draw patterns first
+            // Draw patterns first (background)
             this.drawPatterns(valueRange, timeRange);
-            // Then draw bars
+            // Draw bars
             this.drawBars(valueRange, timeRange);
-            // Draw statistics
-            this.drawStatistics(valueRange);
+            // Draw trend line on top
+            this.drawTrendLine(valueRange, timeRange);
+            // Draw statistics if enabled
+            if ((_a = this.options.statistics) === null || _a === undefined ? undefined : _a.enabled) {
+                this.drawStatistics(valueRange);
+            }
             this.isDirty = false;
         }
         calculateValueRange() {
@@ -743,9 +793,10 @@
             };
         }
         calculateTimeRange() {
+            const times = this.data.map(d => d.x.valueOf());
             return {
-                min: this.data[0].x.valueOf(),
-                max: this.data[this.data.length - 1].x.valueOf()
+                min: Math.min(...times),
+                max: Math.max(...times)
             };
         }
         drawPatterns(valueRange, timeRange) {
@@ -778,10 +829,20 @@
                 // Format tooltip text with date and value on the same line
                 const tooltipText = ((_b = (_a = this.options.interaction) === null || _a === undefined ? undefined : _a.tooltipFormat) === null || _b === undefined ? undefined : _b.call(_a, point)) ||
                     `Date: ${point.x.toLocaleDateString()}, Value: ${point.y.toFixed(2)}`;
+                const isHovered = i === this.hoveredBarIndex;
                 this.renderer.drawBar(x, y, width, height, this.options.theme.barColor, {
                     interactive: true,
                     tooltip: tooltipText,
-                    highContrast: (_c = this.options.accessibility) === null || _c === undefined ? undefined : _c.highContrast
+                    highContrast: (_c = this.options.accessibility) === null || _c === undefined ? undefined : _c.highContrast,
+                    isHovered,
+                    onHover: () => {
+                        this.hoveredBarIndex = i;
+                        this.triggerUpdate();
+                    },
+                    onLeave: () => {
+                        this.hoveredBarIndex = null;
+                        this.triggerUpdate();
+                    }
                 });
             }
         }
@@ -822,6 +883,59 @@
         }
         exportToSVG() {
             return this.renderer.getSVGElement().outerHTML;
+        }
+        setTheme(theme) {
+            this.options.theme = {
+                ...this.options.theme,
+                ...theme
+            };
+            this.triggerUpdate();
+        }
+        setPatternOptions(options) {
+            if (options.lowValue) {
+                this.lowValueDetector = new LowValueDetector({
+                    ...this.options.patterns.lowValue,
+                    ...options.lowValue
+                });
+            }
+            if (options.stagnation) {
+                this.stagnationDetector = new StagnationDetector({
+                    ...this.options.patterns.stagnation,
+                    ...options.stagnation
+                });
+            }
+            this.options.patterns = {
+                ...this.options.patterns,
+                ...options
+            };
+            this.triggerUpdate();
+        }
+        setOptions(options) {
+            var _a, _b, _c, _d;
+            this.options = {
+                ...this.options,
+                ...options
+            };
+            // Update renderer if dimensions changed
+            if (options.width !== undefined || options.height !== undefined) {
+                this.renderer.resize(this.getWidth(), this.getHeight());
+            }
+            // Update pattern detectors if pattern options changed
+            if (options.patterns) {
+                if (options.patterns.lowValue) {
+                    this.lowValueDetector = new LowValueDetector({
+                        ...(_b = (_a = this.options.patterns) === null || _a === undefined ? undefined : _a.lowValue) !== null && _b !== undefined ? _b : {},
+                        ...options.patterns.lowValue
+                    });
+                }
+                if (options.patterns.stagnation) {
+                    this.stagnationDetector = new StagnationDetector({
+                        ...(_d = (_c = this.options.patterns) === null || _c === undefined ? undefined : _c.stagnation) !== null && _d !== undefined ? _d : {},
+                        ...options.patterns.stagnation
+                    });
+                }
+            }
+            this.triggerUpdate();
         }
     }
 

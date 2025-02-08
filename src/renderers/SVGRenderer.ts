@@ -10,63 +10,53 @@ interface SVGRendererOptions {
 
 export class SVGRenderer {
   private svg: SVGSVGElement;
-  private defs: SVGDefsElement;
   private mainGroup: SVGGElement;
+  private tooltip: SVGGElement;
+  private tooltipBackground: SVGRectElement;
+  private tooltipText: SVGTextElement;
   private width: number;
   private height: number;
-  private tooltip: SVGTextElement;
-  private tooltipBackground: SVGRectElement;
 
-  constructor(container: HTMLElement, width: number, height: number) {
-    this.width = width;
-    this.height = height;
-    this.svg = document.createElementNS(SVG_NS, 'svg');
-    this.svg.setAttribute('width', width.toString());
-    this.svg.setAttribute('height', height.toString());
-    this.svg.setAttribute('class', 'mtplot-svg');
-    
-    // Create defs for gradients and patterns
-    this.defs = document.createElementNS(SVG_NS, 'defs');
-    this.svg.appendChild(this.defs);
-    
-    // Create main group for transformation
-    this.mainGroup = document.createElementNS(SVG_NS, 'g');
+  constructor(
+    container: HTMLElement,
+    options: {
+      width: number;
+      height: number;
+      backgroundColor?: string;
+    }
+  ) {
+    this.width = options.width;
+    this.height = options.height;
+
+    // Create SVG element
+    this.svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    this.svg.setAttribute("width", this.width.toString());
+    this.svg.setAttribute("height", this.height.toString());
+    this.svg.style.backgroundColor = options.backgroundColor || "#ffffff";
+
+    // Create main group for transformations
+    this.mainGroup = document.createElementNS("http://www.w3.org/2000/svg", "g");
     this.svg.appendChild(this.mainGroup);
 
     // Create tooltip elements
-    this.tooltipBackground = document.createElementNS(SVG_NS, 'rect');
-    this.tooltipBackground.setAttribute('class', 'mtplot-tooltip-bg');
-    this.tooltipBackground.setAttribute('rx', '4');
-    this.tooltipBackground.setAttribute('ry', '4');
-    this.tooltipBackground.setAttribute('fill', 'white');
-    this.tooltipBackground.setAttribute('stroke', '#ccc');
-    this.tooltipBackground.style.display = 'none';
+    this.tooltip = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    this.tooltip.style.display = "none";
     
-    this.tooltip = document.createElementNS(SVG_NS, 'text');
-    this.tooltip.setAttribute('class', 'mtplot-tooltip');
-    this.tooltip.style.display = 'none';
+    this.tooltipBackground = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    this.tooltipBackground.setAttribute("fill", "white");
+    this.tooltipBackground.setAttribute("stroke", "black");
+    this.tooltipBackground.setAttribute("rx", "4");
+    this.tooltipBackground.setAttribute("ry", "4");
     
-    this.svg.appendChild(this.tooltipBackground);
+    this.tooltipText = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    this.tooltipText.setAttribute("fill", "black");
+    this.tooltipText.setAttribute("font-size", "12px");
+    
+    this.tooltip.appendChild(this.tooltipBackground);
+    this.tooltip.appendChild(this.tooltipText);
     this.svg.appendChild(this.tooltip);
-    
-    this.setupSVG(container, width, height);
-    
-    // Setup pan and zoom handling
-    this.setupInteraction();
-  }
 
-  private setupSVG(container: HTMLElement, width: number, height: number): void {
-    const attributes = [
-      ['version', '1.1'],
-      ['viewBox', `0 0 ${width} ${height}`],
-      ['preserveAspectRatio', 'none'],
-      ['style', 'width: 100%; height: 100%;']
-    ];
-
-    attributes.forEach(([name, value]) => {
-      this.svg.setAttribute(name, value);
-    });
-
+    // Add SVG to container
     container.appendChild(this.svg);
   }
 
@@ -132,26 +122,46 @@ export class SVGRenderer {
     width: number,
     height: number,
     color: string,
-    options: SVGRendererOptions = {}
+    options: {
+      interactive?: boolean;
+      tooltip?: string;
+      highContrast?: boolean;
+      isHovered?: boolean;
+      onHover?: () => void;
+      onLeave?: () => void;
+    } = {}
   ): void {
-    const rect = document.createElementNS(SVG_NS, 'rect');
-    rect.setAttribute('x', x.toString());
-    rect.setAttribute('y', y.toString());
-    rect.setAttribute('width', width.toString());
-    rect.setAttribute('height', height.toString());
+    const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    rect.setAttribute("x", x.toString());
+    rect.setAttribute("y", y.toString());
+    rect.setAttribute("width", width.toString());
+    rect.setAttribute("height", height.toString());
+    rect.setAttribute("fill", color);
     
-    if (options.highContrast) {
-      rect.setAttribute('fill', this.getHighContrastColor(color));
-      rect.setAttribute('stroke', 'black');
-      rect.setAttribute('stroke-width', '2');
-    } else {
-      rect.setAttribute('fill', color);
+    if (options.isHovered) {
+      rect.setAttribute("stroke", "#000000");
+      rect.setAttribute("stroke-width", "2");
+      rect.setAttribute("fill-opacity", "0.8");
     }
 
     if (options.interactive) {
-      rect.setAttribute('data-tooltip', options.tooltip || '');
-      rect.style.cursor = 'pointer';
-      this.setupBarInteraction(rect);
+      rect.style.cursor = "pointer";
+      
+      if (options.tooltip) {
+        rect.addEventListener("mouseenter", (e) => {
+          this.showTooltip(options.tooltip!, e.clientX, e.clientY);
+          options.onHover?.();
+        });
+        
+        rect.addEventListener("mouseleave", () => {
+          this.hideTooltip();
+          options.onLeave?.();
+        });
+        
+        rect.addEventListener("mousemove", (e) => {
+          this.updateTooltipPosition(e.clientX, e.clientY);
+        });
+      }
     }
 
     this.mainGroup.appendChild(rect);
@@ -188,63 +198,85 @@ export class SVGRenderer {
     });
   }
 
-  public showTooltip(text: string, x: number, y: number): void {
-    // Join text lines with a space
-    const combinedText = text.split('\n').join(' ');
+  private clientToSVGPoint(clientX: number, clientY: number): { x: number; y: number } {
+    const pt = this.svg.createSVGPoint();
+    pt.x = clientX;
+    pt.y = clientY;
+    
+    // Convert client coordinates to SVG coordinates
+    const svgP = pt.matrixTransform(this.svg.getScreenCTM()?.inverse());
+    return { x: svgP.x, y: svgP.y };
+  }
+
+  public showTooltip(text: string, clientX: number, clientY: number): void {
+    const svgPoint = this.clientToSVGPoint(clientX, clientY);
     
     // Clear previous tooltip content
-    while (this.tooltip.firstChild) {
-      this.tooltip.removeChild(this.tooltip.firstChild);
+    while (this.tooltipText.firstChild) {
+      this.tooltipText.removeChild(this.tooltipText.firstChild);
     }
     
-    // Add single tspan element with combined text
-    const tspan = document.createElementNS(SVG_NS, 'tspan');
-    tspan.textContent = combinedText;
-    tspan.setAttribute('x', '0');
-    this.tooltip.appendChild(tspan);
+    // Add text content
+    const tspan = document.createElementNS("http://www.w3.org/2000/svg", "tspan");
+    tspan.textContent = text;
+    tspan.setAttribute("x", "5");
+    tspan.setAttribute("y", "15");
+    this.tooltipText.appendChild(tspan);
     
     // Calculate tooltip dimensions
-    const bbox = this.tooltip.getBBox();
-    const padding = 8;
+    const bbox = this.tooltipText.getBBox();
+    const padding = 5;
     const tooltipWidth = bbox.width + 2 * padding;
     const tooltipHeight = bbox.height + 2 * padding;
     
-    // Position the text vertically centered with padding
-    tspan.setAttribute('y', (padding + bbox.height).toString());
+    // Position tooltip
+    let tooltipX = svgPoint.x + 10;
+    let tooltipY = svgPoint.y - tooltipHeight - 10;
     
-    // Calculate position that keeps tooltip within bounds
-    let tooltipX = x + 10; // Default offset from cursor
-    let tooltipY = y - tooltipHeight - 10; // Default position above cursor
-    
-    // Adjust horizontal position if tooltip would go outside right edge
+    // Adjust position if tooltip would go outside viewport
     if (tooltipX + tooltipWidth > this.width) {
-      tooltipX = x - tooltipWidth - 10; // Place tooltip to the left of cursor
+      tooltipX = svgPoint.x - tooltipWidth - 10;
     }
-    
-    // Adjust vertical position if tooltip would go outside top edge
     if (tooltipY < 0) {
-      tooltipY = y + 20; // Place tooltip below cursor
+      tooltipY = svgPoint.y + 20;
     }
     
-    // Ensure tooltip doesn't go outside left or bottom edges
-    tooltipX = Math.max(5, Math.min(this.width - tooltipWidth - 5, tooltipX));
-    tooltipY = Math.max(5, Math.min(this.height - tooltipHeight - 5, tooltipY));
+    // Update tooltip position and dimensions
+    this.tooltipBackground.setAttribute("x", tooltipX.toString());
+    this.tooltipBackground.setAttribute("y", tooltipY.toString());
+    this.tooltipBackground.setAttribute("width", tooltipWidth.toString());
+    this.tooltipBackground.setAttribute("height", tooltipHeight.toString());
     
-    // Position the tooltip and background
-    this.tooltip.setAttribute('transform', `translate(${tooltipX}, ${tooltipY})`);
-    this.tooltipBackground.setAttribute('x', tooltipX.toString());
-    this.tooltipBackground.setAttribute('y', tooltipY.toString());
-    this.tooltipBackground.setAttribute('width', tooltipWidth.toString());
-    this.tooltipBackground.setAttribute('height', tooltipHeight.toString());
+    this.tooltipText.setAttribute("transform", `translate(${tooltipX}, ${tooltipY})`);
     
-    // Show the tooltip
-    this.tooltipBackground.style.display = '';
-    this.tooltip.style.display = '';
+    // Show tooltip
+    this.tooltip.style.display = "";
   }
 
   public hideTooltip(): void {
-    this.tooltipBackground.style.display = 'none';
-    this.tooltip.style.display = 'none';
+    this.tooltip.style.display = "none";
+  }
+
+  public updateTooltipPosition(clientX: number, clientY: number): void {
+    const svgPoint = this.clientToSVGPoint(clientX, clientY);
+    const bbox = this.tooltipText.getBBox();
+    const padding = 5;
+    const tooltipWidth = bbox.width + 2 * padding;
+    const tooltipHeight = bbox.height + 2 * padding;
+    
+    let tooltipX = svgPoint.x + 10;
+    let tooltipY = svgPoint.y - tooltipHeight - 10;
+    
+    if (tooltipX + tooltipWidth > this.width) {
+      tooltipX = svgPoint.x - tooltipWidth - 10;
+    }
+    if (tooltipY < 0) {
+      tooltipY = svgPoint.y + 20;
+    }
+    
+    this.tooltipBackground.setAttribute("x", tooltipX.toString());
+    this.tooltipBackground.setAttribute("y", tooltipY.toString());
+    this.tooltipText.setAttribute("transform", `translate(${tooltipX}, ${tooltipY})`);
   }
 
   public drawPattern(
@@ -298,6 +330,18 @@ export class SVGRenderer {
     attrs.forEach(([name, value]) => textElem.setAttribute(name, value));
     textElem.textContent = text;
     this.mainGroup.appendChild(textElem);
+  }
+
+  public drawLine(x1: number, y1: number, x2: number, y2: number, color: string, width: number): void {
+    const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    line.setAttribute("x1", x1.toString());
+    line.setAttribute("y1", y1.toString());
+    line.setAttribute("x2", x2.toString());
+    line.setAttribute("y2", y2.toString());
+    line.setAttribute("stroke", color);
+    line.setAttribute("stroke-width", width.toString());
+    
+    this.mainGroup.appendChild(line);
   }
 
   public getSVGElement(): SVGSVGElement {

@@ -178,6 +178,12 @@
         // Generate sample data
         function generateData(days = 365) {
             const data = [];
+            const trendData = [];
+
+            // Calculate x values in days since start for regression
+            const xVals = Array.from({length: days}, (_, i) => i);
+            const yVals = [];
+
             const start = new Date();
             start.setDate(start.getDate() - days);
 
@@ -202,13 +208,32 @@
                     value += Math.random() * ((c+a*days*days+b*days)*0.3);
                 
                 data.push({ x: date, y: value });
+                yVals.push(value);
             }
+
+            // Calculate linear regression coefficients
+            const xMean = xVals.reduce((a, b) => a + b, 0) / xVals.length;
+            const yMean = yVals.reduce((a, b) => a + b, 0) / yVals.length;
             
-            return data;
+            const ssxy = xVals.reduce((sum, x, i) => sum + (x - xMean) * (yVals[i] - yMean), 0);
+            const ssxx = xVals.reduce((sum, x) => sum + (x - xMean) * (x - xMean), 0);
+            
+            const slope = ssxy / ssxx;
+            const intercept = yMean - slope * xMean;
+
+            // Generate trend line data
+            for (let i = 0; i < days; i++) {
+                const date = new Date(start);
+                date.setDate(date.getDate() + i);
+                trendData.push({ x: date, y: slope * i + intercept });
+            }
+
+            return { data, trendData };
         }
 
         // Initialize plot with all new options
-        const plot = new MTPlot('plot1', generateData(), {
+        const { data } = generateData();
+        const plot = new MTPlot('plot1', data, {
             width: 1000,
             height: 300,
             responsive: true,
@@ -346,8 +371,8 @@
 
         // Generate more data
         document.getElementById('generateMore').addEventListener('click', () => {
-            const newData = generateData(30);  // Generate 30 more days
-            newData.forEach(point => plot.addData(point));
+            const { data } = generateData(30);  // Generate 30 more days
+            data.forEach(point => plot.addData(point));
         });
     </script>
 </body>

@@ -1,31 +1,38 @@
 import { TextOptions } from '../types';
-interface SVGRendererOptions {
-    highContrast?: boolean;
-    interactive?: boolean;
-    tooltip?: string;
-}
 export declare class SVGRenderer {
     private svg;
-    private defs;
     private mainGroup;
-    private width;
-    private height;
     private tooltip;
     private tooltipBackground;
-    constructor(container: HTMLElement, width: number, height: number);
-    private setupSVG;
+    private tooltipText;
+    private width;
+    private height;
+    constructor(container: HTMLElement, options: {
+        width: number;
+        height: number;
+        backgroundColor?: string;
+    });
     private setupInteraction;
     private updateTransform;
     resize(width: number, height: number): void;
     clear(): void;
-    drawBar(x: number, y: number, width: number, height: number, color: string, options?: SVGRendererOptions): void;
+    drawBar(x: number, y: number, width: number, height: number, color: string, options?: {
+        interactive?: boolean;
+        tooltip?: string;
+        highContrast?: boolean;
+        isHovered?: boolean;
+        onHover?: () => void;
+        onLeave?: () => void;
+    }): void;
     private getHighContrastColor;
     private hexToRgb;
     private setupBarInteraction;
-    showTooltip(text: string, x: number, y: number): void;
+    private clientToSVGPoint;
+    showTooltip(text: string, clientX: number, clientY: number): void;
     hideTooltip(): void;
+    updateTooltipPosition(clientX: number, clientY: number): void;
     drawPattern(x: number, y: number, width: number, height: number, color: string, patternType?: string): void;
     drawText(x: number, y: number, text: string, options?: TextOptions): void;
+    drawLine(x1: number, y1: number, x2: number, y2: number, color: string, width: number): void;
     getSVGElement(): SVGSVGElement;
 }
-export {};

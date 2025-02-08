@@ -1,7 +1,7 @@
 import { SVGRenderer } from './renderers/SVGRenderer';
 import { LowValueDetector } from './patterns/LowValueDetector';
 import { StagnationDetector } from './patterns/StagnationDetector';
-import { DataPoint, PlotOptions, Theme, PatternDetectionOptions } from './types';
+import { DataPoint, PlotOptions, Theme, PatternDetectionOptions, Dataset } from './types';
 import { calculateMean, calculateMedian, calculateMovingAverage } from './utils/Statistics';
 import { formatDate } from './utils/DateUtils';
 
@@ -56,9 +56,11 @@ export class MTPlot {
   private renderer: SVGRenderer;
   private options: PlotOptions;
   private data: DataPoint[];
+  private trendLine: { slope: number; intercept: number } | null = null;
   private lowValueDetector: LowValueDetector;
   private stagnationDetector: StagnationDetector;
   private isDirty: boolean = false;
+  private hoveredBarIndex: number | null = null;
   private updateTimeout: number | null = null;
   private refreshDelay: number = 100;
   private resizeObserver: ResizeObserver | null = null;
@@ -68,49 +70,88 @@ export class MTPlot {
     scale: 1,
     offset: { x: 0, y: 0 }
   };
+  private clusterData: DataPoint[] = []; // Initialize as an empty array
 
   constructor(containerId: string, initialData: DataPoint[] = [], options: Partial<PlotOptions> = {}) {
     const container = document.getElementById(containerId);
     if (!container) throw new Error(`No element found with id: ${containerId}`);
     
     this.container = container;
-    this.options = { ...DEFAULT_OPTIONS, ...options };
     
-    // Initialize tooltip
-    this.setupTooltip();
-    
-    // Initialize WebWorker if enabled
-    if (this.options.performance?.useWebWorker) {
-      this.setupWebWorker();
-    }
-    
-    // Initialize renderer with responsive support
-    this.renderer = new SVGRenderer(
-      container,
-      this.getWidth(),
-      this.getHeight()
-    );
+    // Initialize options with defaults
+    this.options = {
+      width: 800,
+      height: 400,
+      responsive: true,
+      theme: {
+        backgroundColor: "#ffffff",
+        barColor: "#4CAF50",
+        textColor: "#000000",
+        gridColor: "#e0e0e0"
+      },
+      patterns: {
+        lowValue: {
+          threshold: 0.02,
+          consecutiveDays: 2
+        },
+        stagnation: {
+          consecutiveDays: 3,
+          changeThreshold: 0.2,
+          activeChangePercentage: 0.85
+        }
+      },
+      accessibility: {
+        enableKeyboardNavigation: true,
+        enableScreenReader: true,
+        highContrast: false,
+        ariaLabel: 'Time series chart'
+      },
+      interaction: {
+        enableZoom: true,
+        enablePan: true,
+        tooltipFormat: (point: DataPoint) => `${formatDate(point.x)}: ${point.y}`,
+        onPointClick: undefined
+      },
+      performance: {
+        enableVirtualization: true,
+        clusteringThreshold: 1000,
+        useWebWorker: true
+      },
+      statistics: {
+        enabled: false,
+        showMean: false,
+        showMedian: false,
+        showMovingAverage: false,
+        lineColor: {
+          mean: "#FF0000",
+          median: "#0000FF",
+          movingAverage: "#00FF00"
+        }
+      },
+      ...options
+    };
 
-    // Set up accessibility
-    if (this.options.accessibility?.enableScreenReader) {
-      this.setupAccessibility();
-    }
+    // Initialize pattern detectors first
+    this.lowValueDetector = new LowValueDetector(this.options.patterns!.lowValue!);
+    this.stagnationDetector = new StagnationDetector(this.options.patterns!.stagnation!);
+    
+    // Initialize renderer
+    this.renderer = new SVGRenderer(this.container, {
+      width: this.getWidth(),
+      height: this.getHeight(),
+      backgroundColor: this.options.theme!.backgroundColor
+    });
 
     // Initialize data with sorting and clustering if needed
     this.data = this.processInitialData(initialData);
     
-    this.lowValueDetector = new LowValueDetector(this.options.patterns!.lowValue!);
-    this.stagnationDetector = new StagnationDetector(this.options.patterns!.stagnation!);
-
-    // Set up event listeners
-    this.setupEventListeners();
-    
-    // Set up responsive handling
+    // Set up resize handling if responsive
     if (this.options.responsive) {
-      this.setupResponsive();
+      this.setupResizeHandling();
     }
-
-    this.update();
+    
+    // Initial render
+    this.render();
   }
 
   private setupTooltip(): void {
@@ -158,7 +199,8 @@ export class MTPlot {
     }
   }
 
-  private setupResponsive(): void {
+  private setupResizeHandling(): void {
+    // Create ResizeObserver to handle container resizing
     this.resizeObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {
         if (entry.target === this.container) {
@@ -166,7 +208,23 @@ export class MTPlot {
         }
       }
     });
+
+    // Start observing the container
     this.resizeObserver.observe(this.container);
+
+    // Also handle window resize events
+    window.addEventListener('resize', () => {
+      this.handleResize();
+    });
+  }
+
+  private handleResize(): void {
+    // Update SVG dimensions
+    const newWidth = this.getWidth();
+    const newHeight = this.getHeight();
+    
+    this.renderer.resize(newWidth, newHeight);
+    this.triggerUpdate();
   }
 
   private getWidth(): number {
@@ -184,33 +242,43 @@ export class MTPlot {
   private processInitialData(data: DataPoint[]): DataPoint[] {
     let processedData = [...data].sort((a, b) => a.x.valueOf() - b.x.valueOf());
     
-    if (this.options.performance?.enableVirtualization && 
-        processedData.length > (this.options.performance?.clusteringThreshold || 1000)) {
-      processedData = this.clusterData(processedData);
+    // Calculate trend line
+    if (processedData.length > 0) {
+      this.calculateTrendLine(processedData);
     }
     
     return processedData;
   }
 
-  private clusterData(data: DataPoint[]): DataPoint[] {
-    const clusterSize = Math.floor(data.length / this.getWidth());
-    if (clusterSize <= 1) return data;
+  private calculateTrendLine(data: DataPoint[]): void {
+    // Find low value periods to exclude them
+    const lowValuePatterns = this.lowValueDetector.findPatterns(data);
+    const lowValueIndices = new Set<number>();
+    
+    lowValuePatterns.forEach(pattern => {
+      for (let i = pattern.start; i <= pattern.end; i++) {
+        lowValueIndices.add(i);
+      }
+    });
 
-    const clustered: DataPoint[] = [];
-    for (let i = 0; i < data.length; i += clusterSize) {
-      const cluster = data.slice(i, i + clusterSize);
-      const avgX = new Date(
-        cluster.reduce((sum, p) => sum + p.x.valueOf(), 0) / cluster.length
-      );
-      const avgY = cluster.reduce((sum, p) => sum + p.y, 0) / cluster.length;
-      clustered.push({ x: avgX, y: avgY });
-    }
-    return clustered;
-  }
-
-  private handleResize(): void {
-    this.renderer.resize(this.getWidth(), this.getHeight());
-    this.triggerUpdate();
+    // Filter out low value periods
+    const filteredData = data.filter((_, index) => !lowValueIndices.has(index));
+    
+    if (filteredData.length < 2) return; // Need at least 2 points for a trend line
+    
+    const xVals = filteredData.map((_, i) => i);
+    const yVals = filteredData.map(point => point.y);
+    
+    const xMean = xVals.reduce((a, b) => a + b, 0) / xVals.length;
+    const yMean = yVals.reduce((a, b) => a + b, 0) / yVals.length;
+    
+    const ssxy = xVals.reduce((sum, x, i) => sum + (x - xMean) * (yVals[i] - yMean), 0);
+    const ssxx = xVals.reduce((sum, x) => sum + (x - xMean) * (x - xMean), 0);
+    
+    const slope = ssxy / ssxx;
+    const intercept = yMean - slope * xMean;
+    
+    this.trendLine = { slope, intercept };
   }
 
   private handleKeyboardNavigation(e: KeyboardEvent): void {
@@ -296,53 +364,60 @@ export class MTPlot {
     return closest;
   }
 
-  public setTheme(theme: Partial<Theme>): void {
-    this.options.theme = { ...this.options.theme!, ...theme };
-    this.triggerUpdate();
+  private drawTrendLine(valueRange: { min: number; max: number }, timeRange: { min: number; max: number }): void {
+    if (!this.trendLine || !this.data.length) return;
+
+    const { slope, intercept } = this.trendLine;
+    
+    // Calculate start and end points for trend line
+    const startX = this.getXPosition(this.data[0].x, timeRange);
+    const endX = this.getXPosition(this.data[this.data.length - 1].x, timeRange);
+    
+    const startY = this.scaleY(slope * 0 + intercept, valueRange);
+    const endY = this.scaleY(slope * (this.data.length - 1) + intercept, valueRange);
+    
+    this.renderer.drawLine(
+      startX,
+      startY,
+      endX,
+      endY,
+      "#ff0000",
+      2
+    );
   }
 
-  public setPatternOptions(options: Partial<PatternDetectionOptions>): void {
-    if (options.lowValue) {
-      this.lowValueDetector = new LowValueDetector({
-        ...this.options.patterns!.lowValue!,
-        ...options.lowValue
-      });
+  private render(): void {
+    if (!this.isDirty) return;
+    
+    this.renderer.clear();
+    if (this.data.length === 0) return;
+
+    const { width, height } = this.options;
+    const valueRange = this.calculateValueRange();
+    const timeRange = this.calculateTimeRange();
+
+    // Draw patterns first (background)
+    this.drawPatterns(valueRange, timeRange);
+    
+    // Draw bars
+    this.drawBars(valueRange, timeRange);
+    
+    // Draw trend line on top
+    this.drawTrendLine(valueRange, timeRange);
+
+    // Draw statistics if enabled
+    if (this.options.statistics?.enabled) {
+      this.drawStatistics(valueRange);
     }
-    
-    if (options.stagnation) {
-      this.stagnationDetector = new StagnationDetector({
-        ...this.options.patterns!.stagnation!,
-        ...options.stagnation
-      });
-    }
-    
-    this.options.patterns = {
-      ...this.options.patterns!,
-      ...options
-    };
-    
-    this.triggerUpdate();
+
+    this.isDirty = false;
   }
 
-  public addData(point: DataPoint): void {
+  private addData(point: DataPoint): void {
     this.data.push(point);
     this.data.sort((a, b) => a.x.valueOf() - b.x.valueOf());
+    this.calculateTrendLine(this.data);
     this.triggerUpdate();
-  }
-
-  public removeOldest(): void {
-    if (this.data.length > 0) {
-      this.data.shift();
-      this.triggerUpdate();
-    }
-  }
-
-  public replaceOldest(point: DataPoint): void {
-    if (this.data.length > 0) {
-      this.data[0] = point;
-      this.data.sort((a, b) => a.x.valueOf() - b.x.valueOf());
-      this.triggerUpdate();
-    }
   }
 
   private triggerUpdate(): void {
@@ -367,15 +442,20 @@ export class MTPlot {
     const valueRange = this.calculateValueRange();
     const timeRange = this.calculateTimeRange();
     
-    // Draw patterns first
+    // Draw patterns first (background)
     this.drawPatterns(valueRange, timeRange);
     
-    // Then draw bars
+    // Draw bars
     this.drawBars(valueRange, timeRange);
     
-    // Draw statistics
-    this.drawStatistics(valueRange);
-    
+    // Draw trend line on top
+    this.drawTrendLine(valueRange, timeRange);
+
+    // Draw statistics if enabled
+    if (this.options.statistics?.enabled) {
+      this.drawStatistics(valueRange);
+    }
+
     this.isDirty = false;
   }
 
@@ -388,9 +468,10 @@ export class MTPlot {
   }
 
   private calculateTimeRange(): { min: number; max: number } {
+    const times = this.data.map(d => d.x.valueOf());
     return {
-      min: this.data[0].x.valueOf(),
-      max: this.data[this.data.length - 1].x.valueOf()
+      min: Math.min(...times),
+      max: Math.max(...times)
     };
   }
 
@@ -442,6 +523,8 @@ export class MTPlot {
       const tooltipText = this.options.interaction?.tooltipFormat?.(point) || 
         `Date: ${point.x.toLocaleDateString()}, Value: ${point.y.toFixed(2)}`;
 
+      const isHovered = i === this.hoveredBarIndex;
+      
       this.renderer.drawBar(
         x,
         y,
@@ -451,7 +534,16 @@ export class MTPlot {
         {
           interactive: true,
           tooltip: tooltipText,
-          highContrast: this.options.accessibility?.highContrast
+          highContrast: this.options.accessibility?.highContrast,
+          isHovered,
+          onHover: () => {
+            this.hoveredBarIndex = i;
+            this.triggerUpdate();
+          },
+          onLeave: () => {
+            this.hoveredBarIndex = null;
+            this.triggerUpdate();
+          }
         }
       );
     }
@@ -514,5 +606,66 @@ export class MTPlot {
 
   public exportToSVG(): string {
     return this.renderer.getSVGElement().outerHTML;
+  }
+
+  public setTheme(theme: Partial<Theme>): void {
+    this.options.theme = {
+      ...this.options.theme!,
+      ...theme
+    };
+    this.triggerUpdate();
+  }
+
+  public setPatternOptions(options: Partial<PatternDetectionOptions>): void {
+    if (options.lowValue) {
+      this.lowValueDetector = new LowValueDetector({
+        ...this.options.patterns!.lowValue!,
+        ...options.lowValue
+      });
+    }
+    
+    if (options.stagnation) {
+      this.stagnationDetector = new StagnationDetector({
+        ...this.options.patterns!.stagnation!,
+        ...options.stagnation
+      });
+    }
+    
+    this.options.patterns = {
+      ...this.options.patterns!,
+      ...options
+    };
+    
+    this.triggerUpdate();
+  }
+
+  public setOptions(options: Partial<PlotOptions>): void {
+    this.options = {
+      ...this.options,
+      ...options
+    };
+
+    // Update renderer if dimensions changed
+    if (options.width !== undefined || options.height !== undefined) {
+      this.renderer.resize(this.getWidth(), this.getHeight());
+    }
+
+    // Update pattern detectors if pattern options changed
+    if (options.patterns) {
+      if (options.patterns.lowValue) {
+        this.lowValueDetector = new LowValueDetector({
+          ...this.options.patterns?.lowValue ?? {},
+          ...options.patterns.lowValue
+        });
+      }
+      if (options.patterns.stagnation) {
+        this.stagnationDetector = new StagnationDetector({
+          ...this.options.patterns?.stagnation ?? {},
+          ...options.patterns.stagnation
+        });
+      }
+    }
+
+    this.triggerUpdate();
   }
 }

@@ -25,6 +25,17 @@ export interface PlotOptions {
         clusteringThreshold?: number;
         useWebWorker?: boolean;
     };
+    statistics?: {
+        enabled?: boolean;
+        showMean?: boolean;
+        showMedian?: boolean;
+        showMovingAverage?: boolean;
+        lineColor?: {
+            mean?: string;
+            median?: string;
+            movingAverage?: string;
+        };
+    };
 }
 export interface Theme {
     barColor: string;
